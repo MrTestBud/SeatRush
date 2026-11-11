@@ -1,0 +1,59 @@
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/seatrush}
+    username: ${DB_USER:seatrush}
+    password: ${DB_PASSWORD:seatrush}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # Flyway owns the schema; Hibernate only checks it matches
+  flyway:
+    enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 500ms          # Redis is an accelerator: never let it stall a request
+      connect-timeout: 500ms
+server:
+  forward-headers-strategy: native   # trust X-Forwarded-For from nginx so rate limits see the real client IP
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-me-change-me-change-me-change-me-1234}
+    expiration-minutes: 60
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
+  redis:
+    enabled: ${REDIS_ENABLED:true}   # false = no hold gate / cache; rate limits fall back to in-memory
+  scheduling:
+    enabled: true
+  booking:
+    hold-minutes: ${HOLD_MINUTES:5}          # how long picked seats are reserved before payment starts
+    payment-minutes: 10                      # extra time once the user is on the payment step
+    max-seats: 8
+    lock-strategy: ${LOCK_STRATEGY:PESSIMISTIC}   # PESSIMISTIC | OPTIMISTIC
+    redis-gate: true
+    sweep-interval-ms: 5000
+  outbox:
+    poll-interval-ms: 5000
+  payment:
+    provider: ${PAYMENT_PROVIDER:mock}       # mock | razorpay
+    webhook-secret: ${PAYMENT_WEBHOOK_SECRET:dev-webhook-secret-change-me}
+    razorpay:
+      key-id: ${RAZORPAY_KEY_ID:}
+      key-secret: ${RAZORPAY_KEY_SECRET:}
+  rate-limit:
+    auth-per-minute: ${RATE_LIMIT_AUTH:20}   # per IP, login + register
+    hold-per-minute: ${RATE_LIMIT_HOLD:30}   # per user, seat holds
+  mail:
+    from: ${MAIL_FROM:no-reply@seatrush.local}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  health:
+    redis:
+      enabled: false   # Redis being down degrades features, it does not make the app unhealthy

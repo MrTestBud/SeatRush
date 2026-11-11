@@ -1,0 +1,56 @@
+# Four containers on one private network. They reach each other by SERVICE NAME
+# (e.g. the backend connects to "postgres:5432" and "redis:6379", nginx forwards /api to "backend:8080").
+#
+#   docker compose up -d --build        whole stack   -> http://localhost:3000
+#   docker compose up -d postgres redis only the data stores, for `mvn spring-boot:run` + `npm run dev`
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: seatrush
+      POSTGRES_USER: seatrush
+      POSTGRES_PASSWORD: seatrush
+    ports: ["5432:5432"]            # host:container. Lets you inspect the DB from your PC too.
+    volumes: [pgdata:/var/lib/postgresql/data]   # data survives container restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seatrush"]
+      interval: 5s
+      retries: 10
+
+  # Seat-hold gate (SET NX PX), event cache and rate-limit counters. Nothing durable lives here.
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  backend:
+    build: .                        # builds the image from ./Dockerfile
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/seatrush   # "postgres" = the service name above
+      DB_USER: seatrush
+      DB_PASSWORD: seatrush
+      REDIS_HOST: redis
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      # Set these in a .env file next to this one for anything that is not your laptop:
+      JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me-1234}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-dev-webhook-secret-change-me}
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}        # mock | razorpay
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+    ports: ["8080:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy  # wait until the DB actually accepts connections
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend               # React build served by nginx
+    ports: ["3000:80"]
+    depends_on: [backend]
+
+volumes:
+  pgdata:
