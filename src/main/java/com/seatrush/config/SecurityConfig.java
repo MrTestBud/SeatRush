@@ -43,12 +43,13 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())
             .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(a -> a
-                .requestMatchers("/api/auth/register", "/api/auth/login").permitAll()
+                .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/verify-email",
+                        "/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
                 // Payment provider calls this; it is authenticated by its HMAC signature, not a JWT.
                 .requestMatchers(HttpMethod.POST, "/api/payments/webhook").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/events/mine").authenticated()
                 .requestMatchers(HttpMethod.GET, "/api/events/**", "/api/shows/**", "/api/venues/**").permitAll()
-                .requestMatchers("/actuator/health", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                .requestMatchers("/actuator/health", "/actuator/prometheus", "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                 .anyRequest().authenticated())
             .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> res.sendError(401)))
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)

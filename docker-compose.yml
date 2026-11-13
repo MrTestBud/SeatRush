@@ -1,15 +1,16 @@
 # Four containers on one private network. They reach each other by SERVICE NAME
 # (e.g. the backend connects to "postgres:5432" and "redis:6379", nginx forwards /api to "backend:8080").
 #
-#   docker compose up -d --build        whole stack   -> http://localhost:3000
-#   docker compose up -d postgres redis only the data stores, for `mvn spring-boot:run` + `npm run dev`
+#   docker compose up -d --build                          whole stack   -> http://localhost:3000
+#   docker compose up -d postgres redis                   only the data stores, for `mvn spring-boot:run` + `npm run dev`
+#   docker compose --profile observability up -d --build  whole stack + Prometheus (:9090) and Grafana (:3001)
 services:
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: seatrush
       POSTGRES_USER: seatrush
-      POSTGRES_PASSWORD: seatrush
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-seatrush}
     ports: ["5432:5432"]            # host:container. Lets you inspect the DB from your PC too.
     volumes: [pgdata:/var/lib/postgresql/data]   # data survives container restarts
     healthcheck:
@@ -17,7 +18,8 @@ services:
       interval: 5s
       retries: 10
 
-  # Seat-hold gate (SET NX PX), event cache and rate-limit counters. Nothing durable lives here.
+  # Seat-hold gate (SET NX PX), waiting-room queues, event cache, rate-limit counters, live seat-map fan-out.
+  # Nothing durable lives here.
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -31,15 +33,18 @@ services:
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/seatrush   # "postgres" = the service name above
       DB_USER: seatrush
-      DB_PASSWORD: seatrush
+      DB_PASSWORD: ${DB_PASSWORD:-seatrush}
       REDIS_HOST: redis
-      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      CORS_ORIGINS: ${FRONTEND_URL:-http://localhost:3000},http://localhost:5173
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}   # used in the links of verification / reset emails
       # Set these in a .env file next to this one for anything that is not your laptop:
       JWT_SECRET: ${JWT_SECRET:-change-me-change-me-change-me-change-me-1234}
       PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:-dev-webhook-secret-change-me}
       PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}        # mock | razorpay
       RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
       RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      RATE_LIMIT_AUTH: ${RATE_LIMIT_AUTH:-20}
+      RATE_LIMIT_HOLD: ${RATE_LIMIT_HOLD:-30}
     ports: ["8080:8080"]
     depends_on:
       postgres:
@@ -51,6 +56,28 @@ services:
     build: ./frontend               # React build served by nginx
     ports: ["3000:80"]
     depends_on: [backend]
+
+  # ---- optional: metrics and dashboards (docker compose --profile observability up -d)
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    profiles: [observability]
+    volumes: ["./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+    depends_on: [backend]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    profiles: [observability]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"            # read-only dashboards without logging in (local use)
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/seatrush.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
 
 volumes:
   pgdata:

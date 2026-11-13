@@ -48,5 +48,18 @@ public class RazorpayGateway implements PaymentGateway {
         return order.get("id").toString();
     }
 
+    /** Refunds API: POST /payments/{id}/refund with the amount in paise (https://razorpay.com/docs/api/refunds/). */
+    @Override
+    public String refund(String providerPaymentId, BigDecimal amount) {
+        Map<?, ?> refund = http.post().uri("/payments/{id}/refund", providerPaymentId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("amount", amount.movePointRight(2).longValueExact()))
+                .retrieve()
+                .body(Map.class);
+        if (refund == null || refund.get("id") == null)
+            throw new IllegalStateException("Razorpay did not return a refund id");
+        return refund.get("id").toString();
+    }
+
     @Override public String publicKey() { return keyId; }
 }

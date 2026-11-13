@@ -20,5 +20,9 @@ public class MockGateway implements PaymentGateway {
         return "order_mock_" + UUID.randomUUID().toString().replace("-", "");
     }
 
+    @Override public String refund(String providerPaymentId, BigDecimal amount) {
+        return "rfnd_mock_" + UUID.randomUUID().toString().replace("-", "");
+    }
+
     @Override public String publicKey() { return null; }
 }

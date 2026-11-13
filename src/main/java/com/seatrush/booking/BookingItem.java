@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
+
 @Entity
 @Table(name = "booking_items")
 @Getter @NoArgsConstructor
@@ -14,9 +16,12 @@ public class BookingItem {
     private Long bookingId;
     @Column(name = "show_seat_id")
     private Long showSeatId;
+    /** The price this seat was taken at. The seat's list price may change later; this never does. */
+    private BigDecimal price;
 
-    public BookingItem(Long bookingId, Long showSeatId) {
+    public BookingItem(Long bookingId, Long showSeatId, BigDecimal price) {
         this.bookingId = bookingId;
         this.showSeatId = showSeatId;
+        this.price = price;
     }
 }

@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import AuthShell from '../AuthShell';
 import { useAuth } from '../auth';
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const notice = (useLocation().state as { notice?: string } | null)?.notice;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -28,6 +29,7 @@ export default function Login() {
 
   return (
     <AuthShell title="Welcome back" subtitle="Log in to book seats and manage your bookings.">
+      {notice && <p className="notice" role="status">{notice}</p>}
       <form onSubmit={onSubmit} noValidate>
         <label className="field">
           <span>Email</span>
@@ -48,6 +50,7 @@ export default function Login() {
             </button>
           </div>
         </label>
+        <p className="forgot"><Link to="/forgot-password">Forgot your password?</Link></p>
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="primary" type="submit" disabled={busy || !email || !password}>
           {busy ? 'Logging in...' : 'Log in'}

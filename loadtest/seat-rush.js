@@ -4,9 +4,9 @@
 //   k6 run loadtest/seat-rush.js                       (install: https://k6.io/docs/get-started/installation/)
 //   k6 run -e VUS=500 -e SEATS=3 loadtest/seat-rush.js
 //
-// Rate limits are per IP and k6 is one IP, so start the backend with them raised, e.g. in docker-compose.yml:
-//   RATE_LIMIT_AUTH: 100000
-//   RATE_LIMIT_HOLD: 100000
+// Rate limits are per IP and k6 is one IP, so start the stack with them raised:
+//   RATE_LIMIT_AUTH=100000 RATE_LIMIT_HOLD=100000 docker compose up -d --build
+// Add `--profile observability` and watch the run live in Grafana at http://localhost:3001.
 //
 // Pass criteria (see thresholds): every hold answers 201 or 409, never a 5xx; and the number of
 // 201s equals the number of contested seats, i.e. no seat was sold twice.

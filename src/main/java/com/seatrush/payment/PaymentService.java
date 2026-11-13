@@ -29,9 +29,12 @@ public class PaymentService {
     private final PaymentGateway gateway;
     private final ObjectMapper om;
     private final String webhookSecret;
+    private final io.micrometer.core.instrument.MeterRegistry metrics;
 
     public PaymentService(BookingService bookings, PaymentRepository payments, PaymentGateway gateway, ObjectMapper om,
+                          io.micrometer.core.instrument.MeterRegistry metrics,
                           @Value("${app.payment.webhook-secret}") String webhookSecret) {
+        this.metrics = metrics;
         this.bookings = bookings;
         this.payments = payments;
         this.gateway = gateway;
@@ -46,7 +49,7 @@ public class PaymentService {
         if (p == null) {
             // The provider HTTP call happens outside any DB transaction; the booking is re-validated under lock after.
             String orderId = gateway.createOrder(b.getId(), b.getTotalAmount());
-            p = bookings.attachPayment(userId, bookingId, gateway.name(), orderId);
+            p = bookings.attachPayment(userId, bookingId, gateway.name(), orderId, b.getTotalAmount());
         }
         return new PaymentOrderView(p.getProvider(), p.getProviderOrderId(), p.getAmount(),
                 p.getAmount().movePointRight(2).longValueExact(), "INR", gateway.publicKey());
@@ -84,6 +87,7 @@ public class PaymentService {
         if (orderId == null || paymentId == null) throw new BadRequestException("Webhook is missing payment ids");
 
         PaymentOutcome outcome = bookings.applyPaymentResult(orderId, paymentId, success);
+        metrics.counter("seatrush.payments", "outcome", outcome.name().toLowerCase()).increment();
         log.info("Webhook {} for order {} -> {}", event, orderId, outcome);
         return outcome;
     }

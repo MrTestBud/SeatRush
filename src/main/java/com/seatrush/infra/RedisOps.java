@@ -30,7 +30,23 @@ public class RedisOps {
         this.enabled = enabled;
     }
 
+    public boolean isEnabled() { return enabled; }
+
+    public Optional<Double> zscore(String key, String member) { return call(r -> r.opsForZSet().score(key, member)); }
+
+    public void zrem(String key, String member) { call(r -> r.opsForZSet().remove(key, member)); }
+
     public boolean isUsable() { return enabled && System.currentTimeMillis() >= downUntil; }
+
+    public void publish(String channel, String message) {
+        call(r -> { r.convertAndSend(channel, message); return true; });
+    }
+
+    /** Runs a Lua script atomically. Empty = Redis unavailable. */
+    public <T> Optional<T> eval(org.springframework.data.redis.core.script.RedisScript<T> script,
+                                java.util.List<String> keys, Object... args) {
+        return call(r -> r.execute(script, keys, args));
+    }
 
     private <T> Optional<T> call(Function<StringRedisTemplate, T> fn) {
         if (!isUsable()) return Optional.empty();

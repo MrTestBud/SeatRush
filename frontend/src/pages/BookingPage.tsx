@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, errorMessage, rupees, showTime, type Booking, type PaymentOrder } from '../api';
 import { useAuth } from '../auth';
@@ -41,6 +42,12 @@ const STATUS_LABEL: Record<Booking['status'], string> = {
   CANCELLED: 'Cancelled',
 };
 
+const REFUND_TEXT = {
+  REFUND_PENDING: 'is being processed and will go back to your original payment method.',
+  REFUNDED: 'has been sent back to your original payment method.',
+  REFUND_FAILED: 'could not be sent automatically. Our team has been alerted and will sort it out.',
+};
+
 export default function BookingPage() {
   const id = Number(useParams().id);
   const { user } = useAuth();
@@ -49,21 +56,24 @@ export default function BookingPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [code, setCode] = useState('');
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   const refresh = useCallback(() => api.booking(id).then(setBooking), [id]);
   const active = booking?.status === 'HELD' || booking?.status === 'PAYMENT_PENDING';
+  const refundPending = booking?.refund?.status === 'REFUND_PENDING';
   const secondsLeft = useCountdown(active ? booking.expiresAt : null);
 
   useEffect(() => {
     refresh().catch((e) => setError(errorMessage(e)));
   }, [refresh]);
 
-  // While the booking is live, keep checking: the webhook (or the expiry job) changes it server-side.
+  // While something is still in motion server-side (webhook, expiry job, refund), keep checking.
   useEffect(() => {
-    if (!active) return;
+    if (!active && !refundPending) return;
     const timer = setInterval(() => { refresh().catch(() => undefined); }, 3000);
     return () => clearInterval(timer);
-  }, [active, refresh]);
+  }, [active, refundPending, refresh]);
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -109,13 +119,20 @@ export default function BookingPage() {
   const cancel = () => run(async () => {
     await api.cancelBooking(id);
     setOrder(null);
+    setConfirmCancel(false);
   });
+
+  const applyCoupon = (e: FormEvent) => {
+    e.preventDefault();
+    return run(async () => { await api.applyCoupon(id, code); setCode(''); });
+  };
 
   if (error) return <><p className="form-error" role="alert">{error}</p><Link to="/bookings">My bookings</Link></>;
   if (!booking) return <p className="page-status">Loading booking...</p>;
 
   const mm = String(Math.floor(secondsLeft / 60)).padStart(2, '0');
   const ss = String(secondsLeft % 60).padStart(2, '0');
+  const quote = booking.cancellation;
 
   return (
     <div className="booking-page">
@@ -135,6 +152,17 @@ export default function BookingPage() {
               <span>{rupees(s.price)}</span>
             </li>
           ))}
+          {booking.discountAmount > 0 && (
+            <li className="discount">
+              <span>
+                Code {booking.couponCode}
+                {booking.status === 'HELD' && (
+                  <button className="link-btn" disabled={busy} onClick={() => run(() => api.removeCoupon(id))}>Remove</button>
+                )}
+              </span>
+              <span>− {rupees(booking.discountAmount)}</span>
+            </li>
+          )}
           <li className="ticket-total"><span>Total</span><span>{rupees(booking.totalAmount)}</span></li>
         </ul>
 
@@ -147,6 +175,14 @@ export default function BookingPage() {
                 ? <>Your seats are held for <strong>{mm}:{ss}</strong></>
                 : 'Your hold has run out. Releasing seats...'}
             </p>
+
+            {booking.status === 'HELD' && booking.discountAmount === 0 && (
+              <form className="coupon-form" onSubmit={applyCoupon}>
+                <input type="text" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Discount code"
+                       aria-label="Discount code" maxLength={40} autoCapitalize="characters" />
+                <button className="btn ghost" type="submit" disabled={busy || code.trim() === ''}>Apply</button>
+              </form>
+            )}
 
             {order?.provider === 'MOCK' ? (
               <div className="mock-pay">
@@ -171,8 +207,46 @@ export default function BookingPage() {
           </>
         )}
 
-        {booking.status === 'CONFIRMED' && (
-          <p className="ticket-note">You're going! A confirmation email is on its way to {user?.email}.</p>
+        {booking.status === 'CONFIRMED' && booking.ticketCode && (
+          <div className="eticket">
+            <QRCodeSVG value={booking.ticketCode} size={148} marginSize={2} title={`Ticket ${booking.ticketCode}`} />
+            <div>
+              {booking.checkedInAt ? (
+                <p><strong>Checked in</strong> <span className="muted">at {new Date(booking.checkedInAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}. Enjoy the show!</span></p>
+              ) : (
+                <p><strong>Your ticket</strong> <span className="muted">Show this code at the entrance. It admits your whole party, once.</span></p>
+              )}
+              <code className="ticket-code">{booking.ticketCode}</code>
+              <p className="muted small">A confirmation was emailed to {user?.email}.</p>
+            </div>
+          </div>
+        )}
+
+        {booking.status === 'CONFIRMED' && quote && !booking.checkedInAt && (
+          <div className="cancel-box">
+            {!quote.allowed ? (
+              <p className="muted small">{quote.note}</p>
+            ) : !confirmCancel ? (
+              <button className="link-btn danger" onClick={() => setConfirmCancel(true)}>Cancel this booking</button>
+            ) : (
+              <>
+                <p>
+                  <strong>Cancel and get {rupees(quote.refundAmount)} back?</strong>{' '}
+                  <span className="muted">{quote.note} Your seats go back on sale immediately and this cannot be undone.</span>
+                </p>
+                <div className="actions">
+                  <button className="btn danger" disabled={busy} onClick={cancel}>Cancel booking</button>
+                  <button className="btn ghost" disabled={busy} onClick={() => setConfirmCancel(false)}>Keep my seats</button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {booking.refund && (
+          <p className="ticket-note refund-note">
+            Your refund of <strong>{rupees(booking.refund.amount)}</strong> {REFUND_TEXT[booking.refund.status]}
+          </p>
         )}
         {booking.status === 'EXPIRED' && (
           <p className="ticket-note">
@@ -182,7 +256,8 @@ export default function BookingPage() {
         )}
         {booking.status === 'CANCELLED' && (
           <p className="ticket-note">
-            You released these seats. <Link to={`/shows/${booking.showId}`}>Pick seats again</Link>
+            {booking.refund ? 'This booking was cancelled.' : 'You released these seats.'}{' '}
+            <Link to={`/shows/${booking.showId}`}>Pick seats again</Link>
           </p>
         )}
       </div>

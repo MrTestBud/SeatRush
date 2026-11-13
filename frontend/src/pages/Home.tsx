@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { api, errorMessage, type EventItem, type Page } from '../api';
+import { api, categoryLabel, errorMessage, type EventItem, type Page } from '../api';
 import { useAuth } from '../auth';
 
 const PAGE_SIZE = 12;
@@ -9,30 +9,43 @@ export default function Home() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const q = params.get('q') ?? '';
+  const category = params.get('category') ?? '';
   const page = Math.max(0, Number(params.get('page') ?? 0) || 0);
 
   const [text, setText] = useState(q);
+  const [categories, setCategories] = useState<string[]>([]);
   const [result, setResult] = useState<Page<EventItem> | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const go = (next: { q?: string; category?: string; page?: number }) => {
+    const merged = { q, category, page: 0, ...next };
+    const out: Record<string, string> = {};
+    if (merged.q) out.q = merged.q;
+    if (merged.category) out.category = merged.category;
+    if (merged.page > 0) out.page = String(merged.page);
+    setParams(out);
+  };
+
+  useEffect(() => { api.categories().then(setCategories).catch(() => undefined); }, []);
 
   // Typing updates the URL after a short pause, so search is shareable and Back works.
   useEffect(() => {
     if (text.trim() === q) return;
-    const t = setTimeout(() => setParams(text.trim() ? { q: text.trim() } : {}), 300);
+    const t = setTimeout(() => go({ q: text.trim() }), 300);
     return () => clearTimeout(t);
-  }, [text, q, setParams]);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let stale = false;
     setError(null);
-    api.events(q, page, PAGE_SIZE)
+    api.events(q, category, page, PAGE_SIZE)
       .then((p) => { if (!stale) setResult(p); })
       .catch((e) => { if (!stale) setError(errorMessage(e)); });
     return () => { stale = true; };
-  }, [q, page]);
+  }, [q, category, page]);
 
-  const goTo = (p: number) => setParams({ ...(q ? { q } : {}), ...(p > 0 ? { page: String(p) } : {}) });
   const pages = result ? Math.ceil(result.total / PAGE_SIZE) : 0;
+  const filtered = q !== '' || category !== '';
 
   return (
     <>
@@ -48,15 +61,28 @@ export default function Home() {
         />
       </div>
 
+      {categories.length > 1 && (
+        <div className="filters" role="group" aria-label="Filter by category">
+          <button className={category === '' ? 'filter on' : 'filter'} aria-pressed={category === ''} onClick={() => go({ category: '' })}>
+            All
+          </button>
+          {categories.map((c) => (
+            <button key={c} className={category === c ? 'filter on' : 'filter'} aria-pressed={category === c} onClick={() => go({ category: c })}>
+              {categoryLabel(c)}
+            </button>
+          ))}
+        </div>
+      )}
+
       {error && <p className="form-error" role="alert">{error}</p>}
       {!error && result === null && <p className="page-status">Loading events...</p>}
 
       {result && result.items.length === 0 && (
         <div className="empty-state">
-          {q ? (
+          {filtered ? (
             <>
-              <p>No events match "{q}".</p>
-              <button className="link-btn" onClick={() => setText('')}>Clear search</button>
+              <p>No {category ? `${categoryLabel(category).toLowerCase()} ` : ''}events{q ? ` match "${q}"` : ' yet'}.</p>
+              <button className="link-btn" onClick={() => { setText(''); setParams({}); }}>Show all events</button>
             </>
           ) : (
             <>
@@ -75,21 +101,26 @@ export default function Home() {
             {result.items.map((ev) => (
               <li key={ev.id}>
                 <Link to={`/events/${ev.id}`} className="event-card">
-                  <span className="chip">{ev.category.toLowerCase()}</span>
-                  <strong>{ev.title}</strong>
-                  <span className="muted">
-                    {ev.durationMinutes} min{ev.language ? ` · ${ev.language}` : ''}
-                  </span>
-                  {ev.description && <p>{ev.description}</p>}
+                  {ev.posterUrl
+                    ? <img className="poster" src={ev.posterUrl} alt="" loading="lazy" />
+                    : <div className="poster placeholder" aria-hidden="true">{ev.title.charAt(0).toUpperCase()}</div>}
+                  <div className="event-card-body">
+                    <span className="chip">{categoryLabel(ev.category)}</span>
+                    <strong>{ev.title}</strong>
+                    <span className="muted">
+                      {ev.durationMinutes} min{ev.language ? ` · ${ev.language}` : ''}
+                    </span>
+                    {ev.description && <p>{ev.description}</p>}
+                  </div>
                 </Link>
               </li>
             ))}
           </ul>
           {pages > 1 && (
             <nav className="pager" aria-label="Pages">
-              <button className="btn ghost" disabled={page === 0} onClick={() => goTo(page - 1)}>Previous</button>
+              <button className="btn ghost" disabled={page === 0} onClick={() => go({ page: page - 1 })}>Previous</button>
               <span>Page {page + 1} of {pages}</span>
-              <button className="btn ghost" disabled={page + 1 >= pages} onClick={() => goTo(page + 1)}>Next</button>
+              <button className="btn ghost" disabled={page + 1 >= pages} onClick={() => go({ page: page + 1 })}>Next</button>
             </nav>
           )}
         </>

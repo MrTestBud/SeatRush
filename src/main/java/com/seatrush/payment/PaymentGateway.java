@@ -10,6 +10,9 @@ public interface PaymentGateway {
     /** Opens an order with the provider and returns the provider's order id. */
     String createOrder(Long bookingId, BigDecimal amount);
 
+    /** Sends money back for a captured payment and returns the provider's refund id. Throws if the provider refuses. */
+    String refund(String providerPaymentId, BigDecimal amount);
+
     /** Publishable key for the browser checkout; null for the mock provider. */
     String publicKey();
 }

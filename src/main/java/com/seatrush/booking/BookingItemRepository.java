@@ -13,7 +13,7 @@ public interface BookingItemRepository extends JpaRepository<BookingItem, Long> 
     List<BookingItem> findByBookingId(Long bookingId);
 
     @Query("""
-            SELECT new com.seatrush.booking.BookingDtos$SeatLine(bi.bookingId, ss.id, s.rowLabel, s.seatNumber, s.tier, ss.price)
+            SELECT new com.seatrush.booking.BookingDtos$SeatLine(bi.bookingId, ss.id, s.rowLabel, s.seatNumber, s.tier, bi.price)
             FROM BookingItem bi JOIN ShowSeat ss ON ss.id = bi.showSeatId JOIN ss.seat s
             WHERE bi.bookingId IN :bookingIds
             ORDER BY s.rowLabel, s.seatNumber

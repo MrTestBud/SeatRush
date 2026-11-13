@@ -28,4 +28,25 @@ public class AuthController {
     public UserView me(@AuthenticationPrincipal AuthUser me) {
         return users.findById(me.id()).map(UserView::from).orElseThrow(() -> new NotFoundException("User not found"));
     }
+
+    @PostMapping("/verify-email")
+    public UserView verifyEmail(@Valid @RequestBody TokenRequest r) { return auth.verifyEmail(r.token()); }
+
+    @PostMapping("/resend-verification")
+    public Message resendVerification(@AuthenticationPrincipal AuthUser me) {
+        auth.resendVerification(me.id());
+        return new Message("If your email is not verified yet, a new link is on its way.");
+    }
+
+    @PostMapping("/forgot-password")
+    public Message forgotPassword(@Valid @RequestBody EmailRequest r) {
+        auth.forgotPassword(r.email());
+        return new Message("If that address has an account, a reset link is on its way.");
+    }
+
+    @PostMapping("/reset-password")
+    public Message resetPassword(@Valid @RequestBody ResetPasswordRequest r) {
+        auth.resetPassword(r.token(), r.password());
+        return new Message("Your password has been changed. You can log in now.");
+    }
 }

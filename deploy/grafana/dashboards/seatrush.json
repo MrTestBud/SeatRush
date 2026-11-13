@@ -1,0 +1,93 @@
+{
+  "uid": "seatrush",
+  "title": "SeatRush",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Holds per second",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } },
+      "targets": [{ "expr": "sum(rate(seatrush_hold_seconds_count[1m]))", "refId": "A" }]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Conflict rate (lost the seat race)",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 1, "min": 0, "max": 1 } },
+      "targets": [{ "expr": "sum(rate(seatrush_hold_seconds_count{outcome=\"conflict\"}[1m])) / clamp_min(sum(rate(seatrush_hold_seconds_count[1m])), 0.000001)", "refId": "A" }]
+    },
+    {
+      "id": 3, "type": "stat", "title": "Hold latency p95",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum(rate(seatrush_hold_seconds_bucket[1m])) by (le))", "refId": "A" }]
+    },
+    {
+      "id": 4, "type": "stat", "title": "Live seat-map viewers",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(seatrush_seatmap_viewers)", "refId": "A" }]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "Holds by outcome",
+      "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [{ "expr": "sum(rate(seatrush_hold_seconds_count[1m])) by (outcome)", "legendFormat": "{{outcome}}", "refId": "A" }]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Hold latency by locking strategy (p50 / p95 / p99)",
+      "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(seatrush_hold_seconds_bucket[1m])) by (le, strategy))", "legendFormat": "p50 {{strategy}}", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum(rate(seatrush_hold_seconds_bucket[1m])) by (le, strategy))", "legendFormat": "p95 {{strategy}}", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum(rate(seatrush_hold_seconds_bucket[1m])) by (le, strategy))", "legendFormat": "p99 {{strategy}}", "refId": "C" }
+      ]
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Payment results (last 5 minutes)",
+      "gridPos": { "x": 0, "y": 13, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "sum(increase(seatrush_payments_total[5m])) by (outcome)", "legendFormat": "{{outcome}}", "refId": "A" }]
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Expired holds and refunds (last 5 minutes)",
+      "gridPos": { "x": 8, "y": 13, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "sum(increase(seatrush_bookings_expired_total[5m]))", "legendFormat": "holds expired", "refId": "A" },
+        { "expr": "sum(increase(seatrush_refunds_total[5m])) by (outcome)", "legendFormat": "refund {{outcome}}", "refId": "B" }
+      ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "HTTP requests by status",
+      "gridPos": { "x": 16, "y": 13, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" } },
+      "targets": [{ "expr": "sum(rate(http_server_requests_seconds_count[1m])) by (status)", "legendFormat": "{{status}}", "refId": "A" }]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Database connections (HikariCP)",
+      "gridPos": { "x": 0, "y": 21, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "hikaricp_connections_active", "legendFormat": "active", "refId": "A" },
+        { "expr": "hikaricp_connections_pending", "legendFormat": "waiting for a connection", "refId": "B" }
+      ]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "JVM heap used",
+      "gridPos": { "x": 12, "y": 21, "w": 12, "h": 7 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [{ "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "heap", "refId": "A" }]
+    }
+  ]
+}

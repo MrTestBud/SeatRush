@@ -10,10 +10,12 @@ import com.seatrush.user.Role;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 
@@ -31,19 +33,28 @@ public class EventService {
 
     private final EventRepository events;
     private final JsonCache cache;
+    private final JdbcTemplate jdbc;
 
     @Transactional(readOnly = true)
-    public PageResponse<EventView> list(String q, int page, int size) {
+    public PageResponse<EventView> list(String q, String category, int page, int size) {
         int safeSize = Math.min(Math.max(size, 1), 50);
         int safePage = Math.max(page, 0);
         String query = (q == null || q.isBlank()) ? "" : q.trim();
-        String key = "events:list:" + cache.generation(GENERATION) + ":" + safePage + ":" + safeSize + ":" + query.toLowerCase();
+        String cat = (category == null || category.isBlank()) ? "" : category.trim().toUpperCase();
+        String key = "events:list:" + cache.generation(GENERATION) + ":" + safePage + ":" + safeSize + ":" + cat + ":" + query.toLowerCase();
         return cache.get(key, new TypeReference<>() {}, TTL, () -> {
-            var result = query.isEmpty()
-                    ? events.findAll(PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "id")))
-                    : events.search(query, PageRequest.of(safePage, safeSize));
+            var newestFirst = PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "id"));
+            var result = !query.isEmpty() ? events.search(query, cat, PageRequest.of(safePage, safeSize))
+                    : cat.isEmpty() ? events.findAll(newestFirst)
+                    : events.findByCategoryIgnoreCase(cat, newestFirst);
             return PageResponse.of(result.map(EventView::from));
         });
+    }
+
+    /** Categories that actually have events, for the filter chips. */
+    @Transactional(readOnly = true)
+    public List<String> categories() {
+        return cache.get("events:categories:" + cache.generation(GENERATION), new TypeReference<>() {}, TTL, events::categories);
     }
 
     @Transactional(readOnly = true)
@@ -82,6 +93,34 @@ public class EventService {
         invalidate(id);
     }
 
+    /** Organizer dashboard: seats sold, occupancy, check-ins and revenue per show, in one query. */
+    @Transactional(readOnly = true)
+    public EventStats stats(AuthUser user, Long id) {
+        owned(user, id);
+        List<ShowStats> shows = jdbc.query("""
+                SELECT s.id, s.starts_at, v.name,
+                       (SELECT count(*) FROM show_seats ss WHERE ss.show_id = s.id) AS total,
+                       (SELECT count(*) FROM show_seats ss WHERE ss.show_id = s.id AND ss.status = 'BOOKED') AS booked,
+                       (SELECT count(*) FROM show_seats ss WHERE ss.show_id = s.id AND ss.status = 'HELD' AND ss.held_until > now()) AS held,
+                       (SELECT count(*) FROM bookings b WHERE b.show_id = s.id AND b.status = 'CONFIRMED') AS confirmed,
+                       (SELECT count(*) FROM bookings b WHERE b.show_id = s.id AND b.status = 'CONFIRMED' AND b.checked_in_at IS NOT NULL) AS checked_in,
+                       COALESCE((SELECT sum(b.total_amount) FROM bookings b WHERE b.show_id = s.id AND b.status = 'CONFIRMED'), 0) AS revenue
+                FROM shows s JOIN venues v ON v.id = s.venue_id
+                WHERE s.event_id = ?
+                ORDER BY s.starts_at
+                """, (rs, i) -> new ShowStats(rs.getLong("id"), rs.getTimestamp("starts_at").toInstant(), rs.getString("name"),
+                rs.getInt("total"), rs.getInt("booked"), rs.getInt("held"),
+                rs.getInt("total") - rs.getInt("booked") - rs.getInt("held"),
+                rs.getInt("confirmed"), rs.getInt("checked_in"), rs.getBigDecimal("revenue")), id);
+        return new EventStats(id,
+                shows.stream().mapToInt(ShowStats::totalSeats).sum(),
+                shows.stream().mapToInt(ShowStats::booked).sum(),
+                shows.stream().mapToInt(ShowStats::confirmedBookings).sum(),
+                shows.stream().mapToInt(ShowStats::checkedIn).sum(),
+                shows.stream().map(ShowStats::revenue).reduce(BigDecimal.ZERO, BigDecimal::add),
+                shows);
+    }
+
     /** Loads an event and verifies the caller owns it (admins bypass). */
     public Event owned(AuthUser user, Long id) {
         Event e = find(id);
@@ -90,7 +129,7 @@ public class EventService {
         return e;
     }
 
-    private void invalidate(Long id) {
+    public void invalidate(Long id) {
         cache.evict("event:" + id);
         cache.bumpGeneration(GENERATION);
     }
@@ -102,7 +141,7 @@ public class EventService {
     private void apply(Event e, EventRequest r) {
         e.setTitle(r.title().trim());
         e.setDescription(r.description());
-        e.setCategory(r.category().trim());
+        e.setCategory(r.category().trim().toUpperCase());
         e.setLanguage(r.language());
         e.setDurationMinutes(r.durationMinutes());
     }

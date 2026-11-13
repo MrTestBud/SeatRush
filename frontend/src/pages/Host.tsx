@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { api, errorMessage, rupees, showTime, type EventItem, type Show, type Venue } from '../api';
+import { api, categoryLabel, errorMessage, type EventInput, type EventItem, type Venue } from '../api';
 import { useAuth } from '../auth';
+import HostEvent from './HostEvent';
 
-const CATEGORIES = ['MOVIE', 'CONCERT', 'COMEDY', 'THEATRE', 'SPORTS'];
+export const CATEGORIES = ['MOVIE', 'CONCERT', 'COMEDY', 'THEATRE', 'SPORTS', 'OTHER'];
 
-/** Organizer console: add a venue, create an event, schedule shows for it. */
+/** Organizer console: add a venue, create an event, schedule shows, then watch sales and check guests in. */
 export default function Host() {
   const { user } = useAuth();
   const [venues, setVenues] = useState<Venue[]>([]);
@@ -23,19 +24,25 @@ export default function Host() {
 
   return (
     <>
-      <div className="page-head"><h1>Host console</h1></div>
+      <div className="page-head">
+        <h1>Host console</h1>
+        <Link className="btn ghost" to="/host/checkin">Check guests in</Link>
+      </div>
       <p className="muted lead">Three steps: add a venue (its seat grid is generated for you), create an event, then schedule shows.</p>
       {error && <p className="form-error" role="alert">{error}</p>}
 
       <div className="host-grid">
         <VenueForm venues={venues} onCreated={reload} />
-        <EventForm onCreated={reload} />
+        <section className="panel">
+          <h2>2. Create an event</h2>
+          <EventForm submitLabel="Create event" onSubmit={async (input) => { await api.createEvent(input); await reload(); }} resetOnSave />
+        </section>
       </div>
 
       <h2>Your events</h2>
       {events === null && !error && <p className="page-status">Loading your events...</p>}
       {events?.length === 0 && <p className="empty">Nothing yet. Create your first event above.</p>}
-      {events?.map((ev) => <EventShows key={ev.id} event={ev} venues={venues} onDeleted={reload} />)}
+      {events?.map((ev) => <HostEvent key={ev.id} event={ev} venues={venues} onChanged={reload} />)}
     </>
   );
 }
@@ -46,16 +53,26 @@ function VenueForm({ venues, onCreated }: { venues: Venue[]; onCreated: () => vo
   const [address, setAddress] = useState('');
   const [rows, setRows] = useState(6);
   const [seatsPerRow, setSeatsPerRow] = useState(10);
+  const [vipRows, setVipRows] = useState(0);
+  const [premiumRows, setPremiumRows] = useState(2);
+  const [aisles, setAisles] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const aisleNumbers = aisles.split(/[\s,]+/).filter(Boolean).map(Number);
+  const regularRows = Math.max(0, rows - vipRows - premiumRows);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (aisleNumbers.some((n) => !Number.isInteger(n) || n < 1 || n >= seatsPerRow)) {
+      setError(`Aisles must be seat numbers between 1 and ${seatsPerRow - 1}, separated by commas (for example 3, 7).`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await api.createVenue({ name, city, address, rows, seatsPerRow });
-      setName(''); setCity(''); setAddress('');
+      await api.createVenue({ name, city, address, rows, seatsPerRow, vipRows, premiumRows, aisles: aisleNumbers });
+      setName(''); setCity(''); setAddress(''); setAisles('');
       onCreated();
     } catch (err) {
       setError(errorMessage(err));
@@ -86,7 +103,21 @@ function VenueForm({ venues, onCreated }: { venues: Venue[]; onCreated: () => vo
           <input type="number" min={1} max={50} value={seatsPerRow} onChange={(e) => setSeatsPerRow(Number(e.target.value))} required />
         </label>
       </div>
-      <p className="hint">{rows * seatsPerRow} seats. The first two rows are premium (1.5x the show's base price).</p>
+      <div className="field-row three">
+        <label className="field"><span>VIP rows</span>
+          <input type="number" min={0} max={26} value={vipRows} onChange={(e) => setVipRows(Number(e.target.value))} />
+        </label>
+        <label className="field"><span>Premium rows</span>
+          <input type="number" min={0} max={26} value={premiumRows} onChange={(e) => setPremiumRows(Number(e.target.value))} />
+        </label>
+        <label className="field"><span>Aisles after seat</span>
+          <input type="text" value={aisles} onChange={(e) => setAisles(e.target.value)} placeholder="e.g. 3, 7" inputMode="numeric" />
+        </label>
+      </div>
+      <p className="hint">
+        {rows * seatsPerRow} seats: from the front, {vipRows} VIP row{vipRows === 1 ? '' : 's'}, {premiumRows} premium,{' '}
+        {regularRows} regular. You set each tier's price per show.
+      </p>
       {error && <p className="form-error" role="alert">{error}</p>}
       <button className="btn" type="submit" disabled={busy}>{busy ? 'Adding...' : 'Add venue'}</button>
       {venues.length > 0 && (
@@ -96,23 +127,32 @@ function VenueForm({ venues, onCreated }: { venues: Venue[]; onCreated: () => vo
   );
 }
 
-function EventForm({ onCreated }: { onCreated: () => void }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState(CATEGORIES[0]);
-  const [language, setLanguage] = useState('');
-  const [durationMinutes, setDurationMinutes] = useState(120);
+/** Shared by "create event" and "edit event". */
+export function EventForm({ initial, submitLabel, onSubmit, onCancel, resetOnSave }: {
+  initial?: EventItem;
+  submitLabel: string;
+  onSubmit: (input: EventInput) => Promise<void>;
+  onCancel?: () => void;
+  resetOnSave?: boolean;
+}) {
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [description, setDescription] = useState(initial?.description ?? '');
+  const [category, setCategory] = useState(initial?.category ?? CATEGORIES[0]);
+  const [language, setLanguage] = useState(initial?.language ?? '');
+  const [durationMinutes, setDurationMinutes] = useState(initial?.durationMinutes ?? 120);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // An event saved earlier may have a category that is not in today's list: keep it selectable.
+  const options = CATEGORIES.includes(category) ? CATEGORIES : [category, ...CATEGORIES];
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await api.createEvent({ title, description, category, language, durationMinutes });
-      setTitle(''); setDescription(''); setLanguage('');
-      onCreated();
+      await onSubmit({ title, description, category, language, durationMinutes });
+      if (resetOnSave) { setTitle(''); setDescription(''); setLanguage(''); }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -121,8 +161,7 @@ function EventForm({ onCreated }: { onCreated: () => void }) {
   }
 
   return (
-    <form className="panel" onSubmit={submit}>
-      <h2>2. Create an event</h2>
+    <form onSubmit={submit}>
       <label className="field"><span>Title</span>
         <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} />
       </label>
@@ -132,7 +171,7 @@ function EventForm({ onCreated }: { onCreated: () => void }) {
       <div className="field-row three">
         <label className="field"><span>Category</span>
           <select value={category} onChange={(e) => setCategory(e.target.value)}>
-            {CATEGORIES.map((c) => <option key={c} value={c}>{c.charAt(0) + c.slice(1).toLowerCase()}</option>)}
+            {options.map((c) => <option key={c} value={c}>{categoryLabel(c)}</option>)}
           </select>
         </label>
         <label className="field"><span>Language</span>
@@ -143,91 +182,10 @@ function EventForm({ onCreated }: { onCreated: () => void }) {
         </label>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      <button className="btn" type="submit" disabled={busy}>{busy ? 'Creating...' : 'Create event'}</button>
-    </form>
-  );
-}
-
-function EventShows({ event, venues, onDeleted }: { event: EventItem; venues: Venue[]; onDeleted: () => void }) {
-  const [shows, setShows] = useState<Show[] | null>(null);
-  const [venueId, setVenueId] = useState<number | ''>('');
-  const [startsAt, setStartsAt] = useState('');
-  const [basePrice, setBasePrice] = useState(200);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = () => api.shows(event.id).then(setShows).catch((e) => setError(errorMessage(e)));
-  useEffect(() => { load(); }, [event.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function addShow(e: FormEvent) {
-    e.preventDefault();
-    if (venueId === '') return;
-    setBusy(true);
-    setError(null);
-    try {
-      await api.createShow(event.id, { venueId, startsAt: new Date(startsAt).toISOString(), basePrice });
-      setStartsAt('');
-      await load();
-    } catch (err) {
-      setError(errorMessage(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function remove() {
-    if (!window.confirm(`Delete "${event.title}" and all its shows? This cannot be undone.`)) return;
-    setError(null);
-    try {
-      await api.deleteEvent(event.id);
-      onDeleted();
-    } catch (err) {
-      setError(errorMessage(err));
-    }
-  }
-
-  return (
-    <section className="panel host-event">
-      <div className="host-event-head">
-        <div>
-          <Link to={`/events/${event.id}`}><strong>{event.title}</strong></Link>
-          <span className="muted"> · {event.category.toLowerCase()} · {event.durationMinutes} min</span>
-        </div>
-        <button className="link-btn danger" onClick={remove}>Delete event</button>
+      <div className="actions">
+        <button className="btn" type="submit" disabled={busy}>{busy ? 'Saving...' : submitLabel}</button>
+        {onCancel && <button className="btn ghost" type="button" onClick={onCancel}>Cancel</button>}
       </div>
-
-      {shows && shows.length > 0 && (
-        <ul className="host-shows">
-          {shows.map((s) => (
-            <li key={s.id}>
-              <span>{showTime(s.startsAt)} · {s.venueName}</span>
-              <span>{rupees(s.basePrice)} <Link to={`/shows/${s.id}`}>Seat map</Link></span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {shows?.length === 0 && <p className="hint">No shows yet. Nobody can book until you add one.</p>}
-
-      {venues.length === 0 ? (
-        <p className="hint">Add a venue first, then you can schedule a show here.</p>
-      ) : (
-        <form className="show-form" onSubmit={addShow}>
-          <label className="field"><span>Venue</span>
-            <select value={venueId} onChange={(e) => setVenueId(e.target.value ? Number(e.target.value) : '')} required>
-              <option value="">Choose a venue</option>
-              {venues.map((v) => <option key={v.id} value={v.id}>{v.name} ({v.city})</option>)}
-            </select>
-          </label>
-          <label className="field"><span>Starts at</span>
-            <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} required />
-          </label>
-          <label className="field"><span>Base price (₹)</span>
-            <input type="number" min={0} step="0.01" value={basePrice} onChange={(e) => setBasePrice(Number(e.target.value))} required />
-          </label>
-          <button className="btn" type="submit" disabled={busy}>{busy ? 'Adding...' : 'Add show'}</button>
-        </form>
-      )}
-      {error && <p className="form-error" role="alert">{error}</p>}
-    </section>
+    </form>
   );
 }

@@ -17,6 +17,7 @@ public class ExpirySweeper {
     private static final int BATCH = 200;
 
     private final BookingService bookings;
+    private final io.micrometer.core.instrument.MeterRegistry metrics;
 
     @Scheduled(fixedDelayString = "${app.booking.sweep-interval-ms:5000}")
     public int sweep() {
@@ -28,6 +29,7 @@ public class ExpirySweeper {
                 log.warn("Could not expire booking {}: {}", id, e.getMessage());
             }
         }
+        if (expired > 0) metrics.counter("seatrush.bookings.expired").increment(expired);
         if (expired > 0) log.info("Expired {} unpaid booking(s) and released their seats", expired);
         return expired;
     }

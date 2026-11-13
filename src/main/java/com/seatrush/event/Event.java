@@ -21,6 +21,8 @@ public class Event {
     private String language;
     @Column(name = "duration_minutes")
     private Integer durationMinutes;
+    @Column(name = "poster_version")
+    private Integer posterVersion;
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 }

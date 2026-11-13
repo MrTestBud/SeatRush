@@ -35,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "app.scheduling.enabled=false",
         "app.rate-limit.auth-per-minute=1000000",
         "app.rate-limit.hold-per-minute=1000000",
+        "app.waiting-room.capacity=2",
         "spring.datasource.hikari.maximum-pool-size=20"
 })
 @AutoConfigureMockMvc
@@ -114,6 +115,54 @@ abstract class IntegrationTestBase {
 
     protected String seatStatus(long showSeatId) {
         return jdbc.queryForObject("SELECT status FROM show_seats WHERE id = ?", String.class, showSeatId);
+    }
+
+    // ---------------------------------------------------------------- booking helpers
+
+    protected org.springframework.test.web.servlet.ResultActions postJson(Account who, String url, Object body) throws Exception {
+        return mvc.perform(post(url).header("Authorization", who.bearer())
+                .contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsString(body)));
+    }
+
+    protected org.springframework.test.web.servlet.ResultActions hold(Account who, long showId, List<Long> seats) throws Exception {
+        return postJson(who, "/api/shows/" + showId + "/holds", Map.of("showSeatIds", seats));
+    }
+
+    protected long holdOk(Account who, long showId, List<Long> seats) throws Exception {
+        return idOf(hold(who, showId, seats).andExpect(status().isCreated()).andReturn());
+    }
+
+    protected String startPayment(Account who, long bookingId) throws Exception {
+        String json = mvc.perform(post("/api/bookings/" + bookingId + "/pay").header("Authorization", who.bearer()))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return JsonPath.read(json, "$.orderId");
+    }
+
+    /** Holds the seats and pays for them with the mock provider; returns the confirmed booking id. */
+    protected long bookOk(Account who, long showId, List<Long> seats) throws Exception {
+        long bookingId = holdOk(who, showId, seats);
+        mvc.perform(post("/api/payments/mock/" + startPayment(who, bookingId) + "/complete")
+                .header("Authorization", who.bearer())).andExpect(status().isOk());
+        return bookingId;
+    }
+
+    protected org.springframework.test.web.servlet.ResultActions booking(Account who, long bookingId) throws Exception {
+        return mvc.perform(get("/api/bookings/" + bookingId).header("Authorization", who.bearer()));
+    }
+
+    /** Pretends the clock moved past the hold deadline. */
+    protected void lapse(long bookingId) {
+        jdbc.update("UPDATE bookings SET expires_at = now() - interval '1 minute' WHERE id = ?", bookingId);
+        jdbc.update("UPDATE show_seats SET held_until = now() - interval '1 minute' WHERE booking_id = ?", bookingId);
+    }
+
+    /** The one-time token from the newest email to this address whose link contains the given path. */
+    protected String tokenFromEmail(String email, String path) {
+        String body = jdbc.queryForObject(
+                "SELECT body FROM outbox WHERE recipient = ? AND body LIKE ? ORDER BY id DESC LIMIT 1",
+                String.class, email, "%" + path + "?token=%");
+        String rest = body.substring(body.indexOf(path + "?token=") + path.length() + 7);
+        return rest.split("\\s", 2)[0];
     }
 
     protected static long idOf(MvcResult r) throws Exception {

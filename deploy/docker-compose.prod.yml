@@ -1,0 +1,54 @@
+# Production overlay: puts the stack behind Caddy, which obtains and renews a TLS certificate for
+# your domain automatically, and stops publishing the database, Redis and API ports to the host.
+#
+# On any Linux server with Docker, with your domain's DNS A record pointing at it and ports 80/443 open:
+#
+#   cp deploy/.env.example .env      # then edit it: domain and secrets
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+#
+# The site is then served at https://<DOMAIN>.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env to the hostname this site is served on}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data             # certificates live here: keep this volume
+      - caddy_config:/config
+    depends_on: [frontend]
+
+  postgres:
+    restart: unless-stopped
+    ports: !reset []                 # reachable only from the other containers
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+
+  redis:
+    restart: unless-stopped
+    ports: !reset []
+
+  backend:
+    restart: unless-stopped
+    ports: !reset []
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (32+ random characters)}
+      PAYMENT_WEBHOOK_SECRET: ${PAYMENT_WEBHOOK_SECRET:?Set PAYMENT_WEBHOOK_SECRET in .env}
+      FRONTEND_URL: https://${DOMAIN}
+      CORS_ORIGINS: https://${DOMAIN}
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-no-reply@${DOMAIN}}
+
+  frontend:
+    restart: unless-stopped
+    ports: !reset []                 # Caddy is the only way in
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -15,9 +15,20 @@ public class AuthDtos {
 
     public record LoginRequest(@NotBlank @Email String email, @NotBlank String password) {}
 
-    public record UserView(Long id, String name, String email, Role role) {
-        public static UserView from(User u) { return new UserView(u.getId(), u.getName(), u.getEmail(), u.getRole()); }
+    public record EmailRequest(@NotBlank @Email String email) {}
+
+    public record TokenRequest(@NotBlank @Size(max = 200) String token) {}
+
+    public record ResetPasswordRequest(@NotBlank @Size(max = 200) String token,
+                                       @NotBlank @Size(min = 8, max = 72) String password) {}
+
+    public record UserView(Long id, String name, String email, Role role, boolean emailVerified) {
+        public static UserView from(User u) {
+            return new UserView(u.getId(), u.getName(), u.getEmail(), u.getRole(), u.isEmailVerified());
+        }
     }
 
     public record AuthResponse(String token, UserView user) {}
+
+    public record Message(String message) {}
 }

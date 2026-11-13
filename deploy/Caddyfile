@@ -1,0 +1,12 @@
+# Caddy gets a Let's Encrypt certificate for {$DOMAIN} on first start and renews it by itself.
+{$DOMAIN} {
+	encode gzip
+
+	# Internal endpoints are not for the public internet (nginx only forwards /api/ anyway; this is belt and braces).
+	@internal path /actuator/*
+	respond @internal 404
+
+	reverse_proxy frontend:80 {
+		flush_interval -1    # do not buffer: the live seat map is a streaming response
+	}
+}

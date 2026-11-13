@@ -6,7 +6,7 @@ import java.util.Set;
 /**
  * Booking state machine.
  * <pre>
- * HELD ──► PAYMENT_PENDING ──► CONFIRMED
+ * HELD ──► PAYMENT_PENDING ──► CONFIRMED ──► CANCELLED   (user cancels a paid booking; refund per policy)
  *   │            │
  *   ├────────────┴──► EXPIRED ──► CONFIRMED   (late payment, only if the seats are still free)
  *   └────────────┴──► CANCELLED
@@ -21,7 +21,8 @@ public enum BookingStatus {
             case HELD -> EnumSet.of(PAYMENT_PENDING, CONFIRMED, EXPIRED, CANCELLED);
             case PAYMENT_PENDING -> EnumSet.of(CONFIRMED, EXPIRED, CANCELLED);
             case EXPIRED -> EnumSet.of(CONFIRMED);
-            case CONFIRMED, CANCELLED -> EnumSet.noneOf(BookingStatus.class);
+            case CONFIRMED -> EnumSet.of(CANCELLED);
+            case CANCELLED -> EnumSet.noneOf(BookingStatus.class);
         };
     }
 

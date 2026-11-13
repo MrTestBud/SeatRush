@@ -11,7 +11,7 @@ import java.util.List;
 public interface ShowRepository extends JpaRepository<Show, Long> {
 
     String VIEW = """
-            SELECT new com.seatrush.show.ShowDtos$ShowView(s.id, s.eventId, e.title, s.venueId, v.name, v.city, s.startsAt, s.basePrice)
+            SELECT new com.seatrush.show.ShowDtos$ShowView(s.id, s.eventId, e.title, s.venueId, v.name, v.city, v.aisles, s.startsAt, s.basePrice, s.waitingRoom, s.dynamicPricing)
             FROM Show s JOIN Event e ON e.id = s.eventId JOIN Venue v ON v.id = s.venueId
             """;
 

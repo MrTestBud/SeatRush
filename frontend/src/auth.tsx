@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { api, tokenStore, type Role, type User } from './api';
 
@@ -8,6 +8,8 @@ interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string, role: Role) => Promise<void>;
   logout: () => void;
+  /** Re-reads the account (for example after the email address was confirmed). */
+  refreshUser: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -26,7 +28,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
+  const refreshUser = useCallback(() => {
+    if (tokenStore.get()) api.me().then(setUser).catch(() => undefined);
+  }, []);
+
   const value: AuthState = {
+    refreshUser,
     user,
     loading,
     login: async (email, password) => {

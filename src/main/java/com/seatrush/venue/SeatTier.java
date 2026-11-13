@@ -1,3 +1,4 @@
 package com.seatrush.venue;
 
-public enum SeatTier { PREMIUM, REGULAR }
+/** Price tiers, front to back. A show prices each tier separately. */
+public enum SeatTier { VIP, PREMIUM, REGULAR }

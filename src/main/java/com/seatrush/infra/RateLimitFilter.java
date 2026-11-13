@@ -14,7 +14,7 @@ import java.io.IOException;
 import java.time.Duration;
 
 /**
- * Throttles the two endpoints worth abusing: credential guessing on /api/auth/* (per IP) and
+ * Throttles the endpoints worth abusing: credential guessing and email flooding on /api/auth/* (per IP) and
  * seat-hold spam (per user). Runs after JwtAuthFilter so the user is known.
  * Deliberately NOT a @Component: it must only run inside the security chain, not also as a servlet filter.
  */
@@ -37,7 +37,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean allowed = true;
         if ("POST".equals(req.getMethod())) {
             String path = req.getRequestURI();
-            if (path.equals("/api/auth/login") || path.equals("/api/auth/register")) {
+            if (path.startsWith("/api/auth/")) {     // login, register, password reset, verification
                 allowed = limiter.allow("auth:" + req.getRemoteAddr(), authPerMinute, WINDOW);
             } else if (path.startsWith("/api/shows/") && path.endsWith("/holds")) {
                 allowed = limiter.allow("hold:" + caller(req), holdPerMinute, WINDOW);

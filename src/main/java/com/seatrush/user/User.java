@@ -20,6 +20,8 @@ public class User {
     private String passwordHash;
     @Enumerated(EnumType.STRING)
     private Role role;
+    @Column(name = "email_verified")
+    private boolean emailVerified;
     @Column(name = "created_at", insertable = false, updatable = false)
     private Instant createdAt;
 }

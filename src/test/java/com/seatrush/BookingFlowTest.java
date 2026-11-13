@@ -33,22 +33,6 @@ class BookingFlowTest extends IntegrationTestBase {
 
     // ---------------------------------------------------------------- helpers
 
-    private ResultActions hold(Account who, long showId, List<Long> seats) throws Exception {
-        return mvc.perform(post("/api/shows/" + showId + "/holds").header("Authorization", who.bearer())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(om.writeValueAsString(Map.of("showSeatIds", seats))));
-    }
-
-    private long holdOk(Account who, long showId, List<Long> seats) throws Exception {
-        return idOf(hold(who, showId, seats).andExpect(status().isCreated()).andReturn());
-    }
-
-    private String startPayment(Account who, long bookingId) throws Exception {
-        String json = mvc.perform(post("/api/bookings/" + bookingId + "/pay").header("Authorization", who.bearer()))
-                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        return JsonPath.read(json, "$.orderId");
-    }
-
     private ResultActions webhook(String orderId, String paymentId, String event) throws Exception {
         String body = om.writeValueAsString(Map.of("event", event, "payload", Map.of("payment",
                 Map.of("entity", Map.of("id", paymentId, "order_id", orderId)))));
@@ -56,18 +40,8 @@ class BookingFlowTest extends IntegrationTestBase {
                 .header("X-Razorpay-Signature", paymentService.sign(body)).content(body));
     }
 
-    private ResultActions booking(Account who, long bookingId) throws Exception {
-        return mvc.perform(get("/api/bookings/" + bookingId).header("Authorization", who.bearer()));
-    }
-
-    /** Pretends the clock moved past the hold deadline. */
-    private void lapse(long bookingId) {
-        jdbc.update("UPDATE bookings SET expires_at = now() - interval '1 minute' WHERE id = ?", bookingId);
-        jdbc.update("UPDATE show_seats SET held_until = now() - interval '1 minute' WHERE booking_id = ?", bookingId);
-    }
-
     private int emailsTo(Account who) {
-        return jdbc.queryForObject("SELECT count(*) FROM outbox WHERE recipient = ?", Integer.class, who.email());
+        return jdbc.queryForObject("SELECT count(*) FROM outbox WHERE recipient = ? AND subject LIKE '%confirmed%'", Integer.class, who.email());
     }
 
     // ---------------------------------------------------------------- happy path
@@ -107,7 +81,7 @@ class BookingFlowTest extends IntegrationTestBase {
         // confirmation email was written in the same transaction, and the worker delivers it
         assertThat(emailsTo(user)).isEqualTo(1);
         outboxWorker.drain();
-        assertThat(jdbc.queryForObject("SELECT status FROM outbox WHERE recipient = ?", String.class, user.email()))
+        assertThat(jdbc.queryForObject("SELECT status FROM outbox WHERE recipient = ? AND subject LIKE '%confirmed%'", String.class, user.email()))
                 .isEqualTo("SENT");
 
         mvc.perform(get("/api/bookings").header("Authorization", user.bearer()))
@@ -309,7 +283,7 @@ class BookingFlowTest extends IntegrationTestBase {
         assertThat(seatStatus(seats.get(1))).as("no partial booking").isEqualTo("AVAILABLE");
         assertThat(jdbc.queryForObject("SELECT status FROM payments WHERE provider_order_id = ?", String.class, orderId))
                 .isEqualTo("REFUND_PENDING");
-        assertThat(jdbc.queryForObject("SELECT subject FROM outbox WHERE recipient = ?", String.class, late.email()))
+        assertThat(jdbc.queryForObject("SELECT subject FROM outbox WHERE recipient = ? AND subject LIKE 'Refund%'", String.class, late.email()))
                 .startsWith("Refund");
     }
 
